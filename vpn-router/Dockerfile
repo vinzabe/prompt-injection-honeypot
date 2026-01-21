@@ -1,62 +1,72 @@
 # =============================================================================
-# Abejar PQC VPN Router - Kyber-1024 Native
+# Post-Quantum VPN Router - Cloudflare Tunnel Focus (Open Source)
 # =============================================================================
-# 
-# Copyright 2024 Abejar. All rights reserved.
-# Contact: grant@abejar.net for full source code access.
-#
-# This Dockerfile builds the VPN router with native Kyber-1024 support.
-# Core PQC implementation is provided as pre-built binaries.
+# Full source code - MIT License
+# Enterprise support: grant@abejar.net
 # =============================================================================
 
-FROM linuxserver/wireguard:latest AS base
+FROM alpine:3.19 AS builder
+
+# Install build dependencies
+RUN apk add --no-cache \
+    build-base \
+    cmake \
+    git \
+    linux-headers \
+    openssl-dev \
+    libmnl-dev \
+    ninja
+
+# Build liboqs (Open Quantum Safe)
+RUN git clone --depth 1 https://github.com/open-quantum-safe/liboqs.git /liboqs && \
+    cd /liboqs && \
+    mkdir build && cd build && \
+    cmake -GNinja \
+        -DOQS_MINIMAL_BUILD="KEM_kyber_1024" \
+        -DBUILD_SHARED_LIBS=ON \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        .. && \
+    ninja && \
+    ninja install
+
+# Production image
+FROM linuxserver/wireguard:latest
 
 LABEL maintainer="Abejar <grant@abejar.net>"
-LABEL description="Post-Quantum Cryptography VPN Router with Kyber-1024"
-LABEL version="1.0.0"
-LABEL com.abejar.pqc="true"
-LABEL com.abejar.pqc.algorithm="kyber1024"
+LABEL description="Post-Quantum VPN Router - Cloudflare Tunnel Focus (Open Source)"
+LABEL license="MIT"
 
-# Install additional dependencies
+# Copy liboqs
+COPY --from=builder /usr/local/lib/liboqs* /usr/local/lib/
+COPY --from=builder /usr/local/include/oqs /usr/local/include/oqs
+
+# Install runtime dependencies
 RUN apk add --no-cache \
     curl \
     jq \
     openssl \
     python3 \
-    py3-pip \
     bash \
-    ca-certificates \
-    && rm -rf /var/cache/apk/*
+    ca-certificates
 
-# Create PQC directory structure
-RUN mkdir -p /opt/abejar/pqc /opt/abejar/bin /opt/abejar/lib
+# Create directories
+RUN mkdir -p /opt/pqc/bin /opt/pqc/lib
 
-# Copy PQC binaries (encrypted/obfuscated)
-COPY pqc-lib/kyber-keygen.bin /opt/abejar/bin/
-COPY pqc-lib/kyber-encaps.bin /opt/abejar/bin/
-COPY pqc-lib/kyber-decaps.bin /opt/abejar/bin/
-COPY pqc-lib/libkyber.so.enc /opt/abejar/lib/
-
-# Copy configuration scripts
-COPY config/routing/setup-routes.sh.enc /opt/abejar/bin/
-COPY entrypoint-pqc.sh.enc /opt/abejar/bin/
-
-# Copy healthcheck
+# Copy PQC wrapper scripts (FULL SOURCE)
+COPY pqc-lib/kyber-wrapper.sh /opt/pqc/bin/
+COPY config/routing/setup-routes.sh /opt/pqc/bin/
+COPY entrypoint.sh /opt/pqc/bin/
 COPY healthcheck.sh /healthcheck.sh
-RUN chmod +x /healthcheck.sh
 
 # Set permissions
-RUN chmod +x /opt/abejar/bin/* 2>/dev/null || true
+RUN chmod +x /opt/pqc/bin/* /healthcheck.sh
 
-# Environment
+# Update library path
+ENV LD_LIBRARY_PATH=/usr/local/lib
 ENV PQC_ENABLED=true
 ENV PQC_ALGORITHM=kyber1024
-ENV PQC_HYBRID_MODE=true
-ENV ABEJAR_VERSION=1.0.0
 
-# Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD /healthcheck.sh
 
-# Override entrypoint to include PQC initialization
 ENTRYPOINT ["/init"]
