@@ -71,3 +71,7 @@ intelligence. We assume:
 
 - All Python deps are pinned via `requirements.txt`
 - The shared `llm_client.py` is vendored (not a third-party package)
+
+## Contact
+
+Responsible disclosure: **g@abejar.net**
