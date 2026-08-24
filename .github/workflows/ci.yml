@@ -1,0 +1,38 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -e ".[dev]"
+      - name: ruff
+        run: ruff check src tests
+      - name: mypy (strict)
+        run: mypy --strict src/pihoney
+      - name: tests + coverage
+        run: pytest --cov=pihoney --cov-report=term-missing --cov-fail-under=85
+
+  demo-flow:
+    runs-on: ubuntu-latest
+    env: { PIHONEY_SECRET: ci-secret }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python -m pip install -e .
+      - name: plant, then verify a crawler is not actionable but an agent is
+        run: |
+          TOKEN=$(python -m pihoney --db /tmp/ph.db plant docs/a.html --json | python -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+          python -m pihoney --db /tmp/ph.db trigger "$TOKEN" --user-agent Googlebot/2.1 --no-host-page
+          python -m pihoney --db /tmp/ph.db trigger "$TOKEN" --user-agent claude-agent/1 && exit 1 || echo "agent flagged"
+          python -m pihoney --db /tmp/ph.db report || true
